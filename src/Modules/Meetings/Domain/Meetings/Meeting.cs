@@ -30,9 +30,7 @@ namespace CompanyName.MyMeetings.Modules.Meetings.Domain.Meetings
 
         private List<MeetingWaitlistMember> _waitlistMembers;
 
-        private int? _attendeesLimit;
-
-        private int _guestsLimit;
+        private MeetingLimits _meetingLimits;
 
         private Term _rsvpTerm;
 
@@ -59,14 +57,28 @@ namespace CompanyName.MyMeetings.Modules.Meetings.Domain.Meetings
             _waitlistMembers = new List<MeetingWaitlistMember>();
         }
 
-        internal Meeting(
+        internal static Meeting CreateNew(MeetingGroupId meetingGroupId,
+            string title,
+            MeetingTerm term,
+            string description,
+            MeetingLocation location,
+            MeetingLimits meetingLimits,
+            Term rsvpTerm,
+            MoneyValue eventFee,
+            List<MemberId> hostsMembersIds,
+            MemberId creatorId)
+        {
+            return new Meeting(meetingGroupId, title, term, description,
+                location, meetingLimits, rsvpTerm, eventFee, hostsMembersIds, creatorId);
+        }
+
+        private Meeting(
             MeetingGroupId meetingGroupId,
             string title, 
             MeetingTerm term, 
             string description, 
             MeetingLocation location, 
-            int? attendeesLimit, 
-            int guestsLimit, 
+            MeetingLimits meetingLimits,
             Term rsvpTerm, 
             MoneyValue eventFee,
             List<MemberId> hostsMembersIds,
@@ -78,8 +90,7 @@ namespace CompanyName.MyMeetings.Modules.Meetings.Domain.Meetings
             _term = term;
             _description = description;
             _location = location;
-            _attendeesLimit = attendeesLimit;
-            _guestsLimit = guestsLimit;
+            _meetingLimits = meetingLimits;
 
             this.SetRsvpTerm(rsvpTerm, _term);
             _eventFee = eventFee;
@@ -96,38 +107,34 @@ namespace CompanyName.MyMeetings.Modules.Meetings.Domain.Meetings
             {
                 foreach (var hostMemberId in hostsMembersIds)
                 {
-                    _attendees.Add(new MeetingAttendee(this.Id, hostMemberId, rsvpDate, MeetingAttendeeRole.Host, 0, MoneyValue.Zero));                    
+                    _attendees.Add(MeetingAttendee.CreateNew(this.Id, hostMemberId, rsvpDate, MeetingAttendeeRole.Host, 0, MoneyValue.Undefined));                    
                 }
             }
             else
             {
-                _attendees.Add(new MeetingAttendee(this.Id, creatorId, rsvpDate, MeetingAttendeeRole.Host, 0, MoneyValue.Zero));
+                _attendees.Add(MeetingAttendee.CreateNew(this.Id, creatorId, rsvpDate, MeetingAttendeeRole.Host, 0, MoneyValue.Undefined));
             }
         }
-
-
 
         public void ChangeMainAttributes(
             string title,
             MeetingTerm term,
             string description,
             MeetingLocation location,
-            int? attendeesLimit,
-            int guestsLimit,
+            MeetingLimits meetingLimits,
             Term rsvpTerm,
             MoneyValue eventFee,
             MemberId modifyUserId)
         {
             base.CheckRule(new AttendeesLimitCannotBeChangedToSmallerThanActiveAttendeesRule(
-                attendeesLimit, 
+                meetingLimits, 
                 this.GetAllActiveAttendeesWithGuestsNumber()));
 
             _title = title;
             _term = term;
             _description = description;
             _location = location;
-            _attendeesLimit = attendeesLimit;
-            _guestsLimit = guestsLimit;
+            _meetingLimits = meetingLimits;
             this.SetRsvpTerm(rsvpTerm, _term);
             _eventFee = eventFee;
 
@@ -147,14 +154,14 @@ namespace CompanyName.MyMeetings.Modules.Meetings.Domain.Meetings
 
             this.CheckRule(new MemberCannotBeAnAttendeeOfMeetingMoreThanOnceRule(attendeeId, _attendees));
 
-            this.CheckRule(new MeetingGuestsNumberIsAboveLimitRule(_guestsLimit, guestsNumber));
+            this.CheckRule(new MeetingGuestsNumberIsAboveLimitRule(_meetingLimits.GuestsLimit, guestsNumber));
             
-            this.CheckRule(new MeetingAttendeesNumberIsAboveLimitRule(_attendeesLimit, this.GetAllActiveAttendeesWithGuestsNumber(), guestsNumber));
+            this.CheckRule(new MeetingAttendeesNumberIsAboveLimitRule(_meetingLimits.AttendeesLimit, this.GetAllActiveAttendeesWithGuestsNumber(), guestsNumber));
 
             var notAttendee = this.GetActiveNotAttendee(attendeeId);
             notAttendee?.ChangeDecision();
 
-            _attendees.Add(new MeetingAttendee(
+            _attendees.Add(MeetingAttendee.CreateNew(
                 this.Id, attendeeId, 
                 SystemClock.Now, 
                 MeetingAttendeeRole.Attendee, 
@@ -168,7 +175,7 @@ namespace CompanyName.MyMeetings.Modules.Meetings.Domain.Meetings
 
             this.CheckRule(new MemberCannotBeNotAttendeeTwiceRule(_notAttendees, memberId));
 
-            _notAttendees.Add(new MeetingNotAttendee(this.Id, memberId));
+            _notAttendees.Add(MeetingNotAttendee.CreateNew(this.Id, memberId));
 
             var attendee = this.GetActiveAttendee(memberId);
 
@@ -180,7 +187,7 @@ namespace CompanyName.MyMeetings.Modules.Meetings.Domain.Meetings
                 .FirstOrDefault();
             if (nextWaitlistMember != null)
             {
-                _attendees.Add(new MeetingAttendee(
+                _attendees.Add(MeetingAttendee.CreateNew(
                     this.Id, 
                     nextWaitlistMember.MemberId, 
                     nextWaitlistMember.SignUpDate, 
@@ -212,7 +219,7 @@ namespace CompanyName.MyMeetings.Modules.Meetings.Domain.Meetings
 
             this.CheckRule(new MemberCannotBeMoreThanOnceOnMeetingWaitlistRule(_waitlistMembers, memberId));
 
-            _waitlistMembers.Add(new MeetingWaitlistMember(this.Id, memberId));
+            _waitlistMembers.Add(MeetingWaitlistMember.CreateNew(this.Id, memberId));
         }
 
         public void SignOffMemberFromWaitlist(MemberId memberId)
@@ -306,7 +313,7 @@ namespace CompanyName.MyMeetings.Modules.Meetings.Domain.Meetings
         {
             if (!rsvpTerm.EndDate.HasValue || rsvpTerm.EndDate > meetingTerm.StartDate)
             {
-                _rsvpTerm = new Term(rsvpTerm.StartDate, meetingTerm.StartDate);
+                _rsvpTerm = Term.CreateNewBetweenDates(rsvpTerm.StartDate, meetingTerm.StartDate);
             }
             else
             {
